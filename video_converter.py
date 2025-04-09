@@ -8,6 +8,60 @@ import tempfile
 import shutil
 import time
 
+# Patch moviepy's resize function to use the correct Pillow constant
+from moviepy.video.fx.resize import resize
+from functools import partial
+
+# Define a patched version of the resize function
+def patched_resize(clip, newsize=None, height=None, width=None, apply_to_mask=True):
+    """
+    Patched version of moviepy's resize function that works with newer Pillow versions.
+    """
+    from PIL import Image
+    
+    # Determine the target size
+    if newsize is not None:
+        w, h = newsize
+    else:
+        w = clip.w if width is None else width
+        h = clip.h if height is None else height
+    
+    # Define the resizer function
+    def resizer(pic, newsize):
+        # Convert to PIL Image
+        pilim = Image.fromarray(pic)
+        
+        # Use LANCZOS instead of ANTIALIAS for newer Pillow versions
+        try:
+            # Try the new constant first (Pillow 10.0+)
+            resized_pil = pilim.resize(newsize[::-1], Image.Resampling.LANCZOS)
+        except AttributeError:
+            try:
+                # Try the old constant (Pillow 9.x)
+                resized_pil = pilim.resize(newsize[::-1], Image.ANTIALIAS)
+            except AttributeError:
+                # Fallback to default
+                resized_pil = pilim.resize(newsize[::-1])
+        
+        # Convert back to numpy array
+        return np.array(resized_pil)
+    
+    # Apply the resize
+    if clip.ismask:
+        fl = lambda pic: 1.0*resizer((255 * pic).astype('uint8'), (w, h))
+    else:
+        fl = lambda pic: resizer(pic.astype('uint8'), (w, h))
+    
+    newclip = clip.fl_image(fl)
+    
+    if apply_to_mask and clip.mask is not None:
+        newclip.mask = patched_resize(clip.mask, newsize=(w, h), apply_to_mask=False)
+    
+    return newclip
+
+# Replace the original resize function with our patched version
+mp.video.fx.resize.resize = patched_resize
+
 def create_square_video(input_path, output_path):
     # Load the video
     video = mp.VideoFileClip(input_path)

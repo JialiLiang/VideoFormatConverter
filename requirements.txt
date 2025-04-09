@@ -1,7 +1,7 @@
 streamlit==1.32.0
 moviepy==2.1.2
 numpy>=1.26.0
-Pillow==9.5.0 --only-binary :all:
+Pillow==8.4.0 --only-binary :all:
 decorator==4.4.2
 imageio==2.31.1
 imageio-ffmpeg==0.4.8
