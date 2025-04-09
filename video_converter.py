@@ -409,7 +409,7 @@ def main():
             st.session_state.stop_processing = False
             
             # Add loading message
-            st.info("⏳ Video conversion is in progress. This may take a few minutes depending on the video size and format. Please be patient - we're working on it!")
+            st.info("⏳ Video conversion is in progress.Your video's loading… almost showtime! 🍿")
             
             progress_text = st.empty()
             progress_bar = st.progress(0)
@@ -510,30 +510,30 @@ def main():
             st.session_state.processed_videos = []
             st.experimental_rerun()
         
-        # Add batch download option
-        if len(st.session_state.processed_videos) > 1:
-            st.info("💡 Tip: You can download individual videos or use the batch download option below.")
-            
-            # Create a zip file with all videos for batch download
-            if st.button("📦 Download All Videos (ZIP)", type="primary"):
-                with st.spinner("Preparing ZIP file..."):
-                    # Create a temporary zip file
-                    zip_path = os.path.join(tempfile.gettempdir(), "converted_videos.zip")
-                    
-                    # Create a zip file with all videos
-                    import zipfile
-                    with zipfile.ZipFile(zip_path, 'w') as zipf:
-                        for video in st.session_state.processed_videos:
-                            zipf.write(video["path"], arcname=video["name"])
-                    
-                    # Provide download button for the zip file
-                    with open(zip_path, "rb") as f:
-                        st.download_button(
-                            label="📥 Download ZIP File",
-                            data=f,
-                            file_name="converted_videos.zip",
-                            mime="application/zip"
-                        )
+        # Add batch download option - show even with a single video
+        st.info("💡 Tip: You can download individual videos or use the batch download option below.")
+        
+        # Create a zip file with all videos for batch download
+        if st.button("📦 Download All Videos (ZIP)", type="primary", use_container_width=True):
+            with st.spinner("Preparing ZIP file..."):
+                # Create a temporary zip file
+                zip_path = os.path.join(tempfile.gettempdir(), "converted_videos.zip")
+                
+                # Create a zip file with all videos
+                import zipfile
+                with zipfile.ZipFile(zip_path, 'w') as zipf:
+                    for video in st.session_state.processed_videos:
+                        zipf.write(video["path"], arcname=video["name"])
+                
+                # Provide download button for the zip file
+                with open(zip_path, "rb") as f:
+                    st.download_button(
+                        label="📥 Download ZIP File",
+                        data=f,
+                        file_name="converted_videos.zip",
+                        mime="application/zip",
+                        use_container_width=True
+                    )
         
         # Group videos by original file
         original_files = {}
