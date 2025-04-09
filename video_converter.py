@@ -171,18 +171,29 @@ def create_square_blur_video_direct(input_path, output_path):
         resized_center = os.path.join(temp_dir, "resized_center.mp4")
         audio_file = os.path.join(temp_dir, "audio.aac")
         
-        # 1. Extract audio
-        subprocess.run([
-            ffmpeg_cmd, "-i", input_path, "-vn", "-acodec", "copy", 
-            audio_file
-        ], check=True, capture_output=True)
+        # 1. Extract audio - with better error handling
+        try:
+            subprocess.run([
+                ffmpeg_cmd, "-i", input_path, "-vn", "-acodec", "copy", 
+                audio_file
+            ], check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            st.error(f"Error extracting audio: {e.stderr}")
+            raise
         
-        # 2. Get video dimensions
-        probe_cmd = [ffprobe_cmd, "-v", "error", "-select_streams", "v:0", 
-                   "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", 
-                   input_path]
-        result = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
-        orig_width, orig_height = map(int, result.stdout.strip().split('x'))
+        # 2. Get video dimensions - with better error handling
+        try:
+            probe_cmd = [ffprobe_cmd, "-v", "error", "-select_streams", "v:0", 
+                       "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", 
+                       input_path]
+            result = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
+            orig_width, orig_height = map(int, result.stdout.strip().split('x'))
+        except subprocess.CalledProcessError as e:
+            st.error(f"Error getting video dimensions: {e.stderr}")
+            raise
+        except ValueError as e:
+            st.error(f"Error parsing video dimensions: {result.stdout}")
+            raise
         
         # Target size is 1080x1080
         target_size = 1080
@@ -206,40 +217,55 @@ def create_square_blur_video_direct(input_path, output_path):
         x_offset = (target_size - visible_width) // 2
         y_offset = 0  # No vertical offset since height is full
         
-        # 3. Create blurred background (scale to fill 1080x1080, then blur)
-        # Scale to fill while maintaining aspect ratio, then crop to square
-        subprocess.run([
-            ffmpeg_cmd, "-i", input_path, "-vf", 
-            "scale=1080:1080:force_original_aspect_ratio=increase,crop=1080:1080,boxblur=30:5", 
-            "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "23", 
-            blurred_bg
-        ], check=True, capture_output=True)
+        # 3. Create blurred background - with better error handling
+        try:
+            subprocess.run([
+                ffmpeg_cmd, "-i", input_path, "-vf", 
+                "scale=1080:1080:force_original_aspect_ratio=increase,crop=1080:1080,boxblur=30:5", 
+                "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "23", 
+                blurred_bg
+            ], check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            st.error(f"Error creating blurred background: {e.stderr}")
+            raise
         
-        # 4. Create centered video using a safer filter approach
-        # Use the scale filter with -2 to ensure divisible by 2 (required for h264)
-        subprocess.run([
-            ffmpeg_cmd, "-i", input_path, "-vf", 
-            f"scale={visible_width}:-2", 
-            "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "23", 
-            resized_center
-        ], check=True, capture_output=True)
+        # 4. Create centered video - with better error handling
+        try:
+            subprocess.run([
+                ffmpeg_cmd, "-i", input_path, "-vf", 
+                f"scale={visible_width}:-2", 
+                "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "23", 
+                resized_center
+            ], check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            st.error(f"Error creating centered video: {e.stderr}")
+            raise
         
-        # 5. Overlay centered video on blurred background
-        subprocess.run([
-            ffmpeg_cmd, "-i", blurred_bg, "-i", resized_center, "-i", audio_file,
-            "-filter_complex", f"[0:v][1:v] overlay={x_offset}:{y_offset} [outv]", 
-            "-map", "[outv]", "-map", "2:a", "-c:v", "libx264", "-c:a", "aac",
-            "-shortest", output_path
-        ], check=True, capture_output=True)
+        # 5. Overlay centered video on blurred background - with better error handling
+        try:
+            subprocess.run([
+                ffmpeg_cmd, "-i", blurred_bg, "-i", resized_center, "-i", audio_file,
+                "-filter_complex", f"[0:v][1:v] overlay={x_offset}:{y_offset} [outv]", 
+                "-map", "[outv]", "-map", "2:a", "-c:v", "libx264", "-c:a", "aac",
+                "-shortest", output_path
+            ], check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            st.error(f"Error overlaying videos: {e.stderr}")
+            raise
         
     except subprocess.CalledProcessError as e:
-        # Clean up and raise an error
-        print(f"Error: {e}")
-        print(f"STDOUT: {e.stdout.decode() if e.stdout else 'None'}")
-        print(f"STDERR: {e.stderr.decode() if e.stderr else 'None'}")
+        # Clean up and raise an error with more details
+        error_msg = f"FFmpeg error: {e.stderr if hasattr(e, 'stderr') else 'Unknown error'}"
+        st.error(error_msg)
         if Path(output_path).exists():
             Path(output_path).unlink()
-        raise e
+        raise Exception(error_msg)
+    except Exception as e:
+        # Handle other exceptions
+        st.error(f"Unexpected error: {str(e)}")
+        if Path(output_path).exists():
+            Path(output_path).unlink()
+        raise
     finally:
         # Clean up temp files
         for file in [blurred_bg, resized_center, audio_file]:
@@ -271,55 +297,83 @@ def create_landscape_video_direct(input_path, output_path):
         resized_center = os.path.join(temp_dir, "resized_center.mp4")
         audio_file = os.path.join(temp_dir, "audio.aac")
         
-        # 1. Extract audio
-        subprocess.run([
-            ffmpeg_cmd, "-i", input_path, "-vn", "-acodec", "copy", 
-            audio_file
-        ], check=True, capture_output=True)
+        # 1. Extract audio - with better error handling
+        try:
+            subprocess.run([
+                ffmpeg_cmd, "-i", input_path, "-vn", "-acodec", "copy", 
+                audio_file
+            ], check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            st.error(f"Error extracting audio: {e.stderr}")
+            raise
         
-        # 2. Create blurred background (scale to fill 1920x1080, then blur)
-        subprocess.run([
-            ffmpeg_cmd, "-i", input_path, "-vf", 
-            "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,boxblur=20:5", 
-            "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "23", 
-            blurred_bg
-        ], check=True, capture_output=True)
+        # 2. Create blurred background - with better error handling
+        try:
+            subprocess.run([
+                ffmpeg_cmd, "-i", input_path, "-vf", 
+                "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,boxblur=20:5", 
+                "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "23", 
+                blurred_bg
+            ], check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            st.error(f"Error creating blurred background: {e.stderr}")
+            raise
         
-        # 3. Create centered video (scale to height=1080, maintain aspect ratio)
-        subprocess.run([
-            ffmpeg_cmd, "-i", input_path, "-vf", 
-            "scale=-1:1080", 
-            "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "23", 
-            resized_center
-        ], check=True, capture_output=True)
+        # 3. Create centered video - with better error handling
+        try:
+            subprocess.run([
+                ffmpeg_cmd, "-i", input_path, "-vf", 
+                "scale=-1:1080", 
+                "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "23", 
+                resized_center
+            ], check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            st.error(f"Error creating centered video: {e.stderr}")
+            raise
         
         # 4. Overlay centered video on blurred background
-        # First get dimensions of the centered video
-        probe_cmd = [ffprobe_cmd, "-v", "error", "-select_streams", "v:0", 
-                    "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", 
-                    resized_center]
-        result = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
-        width, height = map(int, result.stdout.strip().split('x'))
+        # First get dimensions of the centered video - with better error handling
+        try:
+            probe_cmd = [ffprobe_cmd, "-v", "error", "-select_streams", "v:0", 
+                        "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", 
+                        resized_center]
+            result = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
+            width, height = map(int, result.stdout.strip().split('x'))
+        except subprocess.CalledProcessError as e:
+            st.error(f"Error getting video dimensions: {e.stderr}")
+            raise
+        except ValueError as e:
+            st.error(f"Error parsing video dimensions: {result.stdout}")
+            raise
         
         # Calculate position for centered overlay
         x_offset = (1920 - width) // 2
         
-        # Composite videos
-        subprocess.run([
-            ffmpeg_cmd, "-i", blurred_bg, "-i", resized_center, "-i", audio_file,
-            "-filter_complex", f"[0:v][1:v] overlay={x_offset}:0 [outv]", 
-            "-map", "[outv]", "-map", "2:a", "-c:v", "libx264", "-c:a", "aac",
-            "-shortest", output_path
-        ], check=True, capture_output=True)
+        # Composite videos - with better error handling
+        try:
+            subprocess.run([
+                ffmpeg_cmd, "-i", blurred_bg, "-i", resized_center, "-i", audio_file,
+                "-filter_complex", f"[0:v][1:v] overlay={x_offset}:0 [outv]", 
+                "-map", "[outv]", "-map", "2:a", "-c:v", "libx264", "-c:a", "aac",
+                "-shortest", output_path
+            ], check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            st.error(f"Error overlaying videos: {e.stderr}")
+            raise
         
     except subprocess.CalledProcessError as e:
-        # Clean up and raise an error
-        print(f"Error: {e}")
-        print(f"STDOUT: {e.stdout.decode() if e.stdout else 'None'}")
-        print(f"STDERR: {e.stderr.decode() if e.stderr else 'None'}")
+        # Clean up and raise an error with more details
+        error_msg = f"FFmpeg error: {e.stderr if hasattr(e, 'stderr') else 'Unknown error'}"
+        st.error(error_msg)
         if Path(output_path).exists():
             Path(output_path).unlink()
-        raise e
+        raise Exception(error_msg)
+    except Exception as e:
+        # Handle other exceptions
+        st.error(f"Unexpected error: {str(e)}")
+        if Path(output_path).exists():
+            Path(output_path).unlink()
+        raise
     finally:
         # Clean up temp files
         for file in [blurred_bg, resized_center, audio_file]:
