@@ -371,7 +371,7 @@ def main():
         layout="wide"
     )
 
-st.markdown("""
+    st.markdown("""
     Made with ❤️ by Jiali
     """)
     
@@ -577,6 +577,12 @@ st.markdown("""
     
     # Add a footer with additional information
     st.markdown("---")
+    
+    # Add the "Made with love" text
+    st.markdown("""
+    Made with ❤️ by Jiali
+    """)
+    
     st.markdown("### About")
     
     # Display example image with smaller size
