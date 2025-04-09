@@ -7,6 +7,7 @@ import os
 import tempfile
 import shutil
 import time
+import subprocess
 
 # Patch moviepy's resize function to use the correct Pillow constant
 from functools import partial
@@ -60,7 +61,13 @@ def patched_resize(clip, newsize=None, height=None, width=None, apply_to_mask=Tr
 
 # Apply the patched resize function to moviepy if needed
 # This is a fallback in case the direct resize method has issues
-mp.video.fx.resize.resize = patched_resize
+# Fix: Use the correct approach for patching moviepy's resize function
+try:
+    # Try to patch the resize function directly on the VideoClip class
+    mp.VideoClip.resize = patched_resize
+except AttributeError:
+    # If that fails, we'll use the patched function directly in our code
+    pass
 
 def create_square_video(input_path, output_path):
     # Load the video
@@ -130,177 +137,183 @@ def create_square_video(input_path, output_path):
         video.close()
         cropped_video.close()
 
-def create_square_blur_video(input_path, output_path):
-    # Load the video
-    video = mp.VideoFileClip(input_path)
+def create_square_blur_video_direct(input_path, output_path):
+    """Create a square video with blurred background by directly calling ffmpeg."""
+    # Import necessary modules
+    import subprocess
+    import os
+    import tempfile
+    from pathlib import Path
     
-    # Force video to 30 FPS and calculate adjusted duration
-    video = video.set_fps(30)
-    frame_duration = 1.0/30  # Duration of one frame at 30fps
-    exact_duration = video.duration - (4 * frame_duration)  # Remove 2 frames worth of duration
-    
-    # Target dimensions (square)
-    target_size = 1080
-    
-    # Calculate scaling for portrait video in center
-    scale = target_size/video.h  # Changed to always match height
-    new_size = (int(video.w * scale), int(video.h * scale))
-    
-    # Resize original video for center
-    center_video = video.resize(new_size)
-    
-    # Create blurred background - maintain aspect ratio while filling frame
-    bg_scale = max(target_size/video.w, target_size/video.h)
-    bg_size = (int(video.w * bg_scale), int(video.h * bg_scale))
-    background = video.resize(bg_size)
-    background = background.without_audio()  # This line ensures background has no audio
-    
-    # Calculate position to center the background
-    bg_x = (target_size - bg_size[0]) // 2
-    bg_y = (target_size - bg_size[1]) // 2
-    background = background.set_position((bg_x, bg_y))
-    
-    # Apply stronger blur
-    background = background.fl_image(lambda frame: np.array(
-        Image.fromarray(frame)
-        .filter(ImageFilter.GaussianBlur(radius=30))  # Increased blur radius
-        .resize((bg_size[0], bg_size[1]))
-    ))
-    
-    # Position center video
-    x_center = (target_size - new_size[0]) // 2
-    y_center = (target_size - new_size[1]) // 2
-    center_video = center_video.set_position((x_center, y_center))
-    
-    # Composite final video
-    final = mp.CompositeVideoClip([background, center_video], size=(target_size, target_size))
-    
-    # Improved audio handling with adjusted duration
-    if center_video.audio is not None:
-        # Ensure audio duration matches adjusted video duration
-        audio = center_video.audio.subclip(0, exact_duration)
-        final = final.set_audio(audio)
-    
-    # Set the duration of the final video to match the adjusted duration
-    final = final.set_duration(exact_duration)
-    
-    # Write output with high quality settings
     try:
-        final.write_videofile(
-            str(output_path),
-            codec='libx264',
-            audio_codec='aac',
-            temp_audiofile='temp-audio.m4a',
-            remove_temp=True,
-            fps=30,
-            bitrate='6000k',  # High bitrate for better quality
-            audio_bitrate='320k',  # High audio bitrate
-            preset='slow',  # Slower encoding for better quality
-            threads=4,  # Use multiple threads for faster processing
-            ffmpeg_params=[
-                '-profile:v', 'high',  # High profile for better quality
-                '-level', '4.1',  # Higher level for better quality
-                '-crf', '17',  # Lower CRF value for higher quality (range 0-51, lower is better)
-                '-movflags', '+faststart'  # Enable fast start for web playback
-            ]
-        )
-    except Exception as e:
-        # Clean up resources
-        video.close()
-        final.close()
+        # Create a temporary directory for intermediate files
+        temp_dir = tempfile.mkdtemp()
+        
+        # Paths for intermediate files
+        blurred_bg = os.path.join(temp_dir, "blurred_bg.mp4")
+        resized_center = os.path.join(temp_dir, "resized_center.mp4")
+        audio_file = os.path.join(temp_dir, "audio.aac")
+        
+        # 1. Extract audio
+        subprocess.run([
+            "ffmpeg", "-i", input_path, "-vn", "-acodec", "copy", 
+            audio_file
+        ], check=True, capture_output=True)
+        
+        # 2. Get video dimensions
+        probe_cmd = ["ffprobe", "-v", "error", "-select_streams", "v:0", 
+                   "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", 
+                   input_path]
+        result = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
+        orig_width, orig_height = map(int, result.stdout.strip().split('x'))
+        
+        # Target size is 1080x1080
+        target_size = 1080
+        
+        # Calculate dimensions for center video
+        # For portrait videos, use full height and calculate width to maintain aspect ratio
+        # For landscape videos, use height to fill the square
+        if orig_width < orig_height:  # Portrait video
+            # Make video take the full height of the square
+            visible_height = target_size
+            visible_width = int(visible_height * (orig_width / orig_height))
+        else:  # Landscape video
+            # Make video take the full height of the square
+            visible_height = target_size  
+            visible_width = int(visible_height * (orig_width / orig_height))
+        
+        # Ensure width is even (required by H.264)
+        visible_width = visible_width if visible_width % 2 == 0 else visible_width + 1
+            
+        # Calculate position to center horizontally
+        x_offset = (target_size - visible_width) // 2
+        y_offset = 0  # No vertical offset since height is full
+        
+        # 3. Create blurred background (scale to fill 1080x1080, then blur)
+        # Scale to fill while maintaining aspect ratio, then crop to square
+        subprocess.run([
+            "ffmpeg", "-i", input_path, "-vf", 
+            "scale=1080:1080:force_original_aspect_ratio=increase,crop=1080:1080,boxblur=30:5", 
+            "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "23", 
+            blurred_bg
+        ], check=True, capture_output=True)
+        
+        # 4. Create centered video using a safer filter approach
+        # Use the scale filter with -2 to ensure divisible by 2 (required for h264)
+        subprocess.run([
+            "ffmpeg", "-i", input_path, "-vf", 
+            f"scale={visible_width}:-2", 
+            "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "23", 
+            resized_center
+        ], check=True, capture_output=True)
+        
+        # 5. Overlay centered video on blurred background
+        subprocess.run([
+            "ffmpeg", "-i", blurred_bg, "-i", resized_center, "-i", audio_file,
+            "-filter_complex", f"[0:v][1:v] overlay={x_offset}:{y_offset} [outv]", 
+            "-map", "[outv]", "-map", "2:a", "-c:v", "libx264", "-c:a", "aac",
+            "-shortest", output_path
+        ], check=True, capture_output=True)
+        
+    except subprocess.CalledProcessError as e:
+        # Clean up and raise an error
+        print(f"Error: {e}")
+        print(f"STDOUT: {e.stdout.decode() if e.stdout else 'None'}")
+        print(f"STDERR: {e.stderr.decode() if e.stderr else 'None'}")
         if Path(output_path).exists():
             Path(output_path).unlink()
         raise e
     finally:
-        # Clean up resources
-        video.close()
-        final.close()
+        # Clean up temp files
+        for file in [blurred_bg, resized_center, audio_file]:
+            if Path(file).exists():
+                Path(file).unlink()
+        if Path(temp_dir).exists():
+            Path(temp_dir).rmdir()
+
+def create_square_blur_video(input_path, output_path):
+    """
+    Create a square video with blurred background (wrapper for the direct implementation).
+    This function maintains backwards compatibility.
+    """
+    # Just call the direct implementation
+    create_square_blur_video_direct(input_path, output_path)
+
+def create_landscape_video_direct(input_path, output_path):
+    """Create a landscape video by directly calling ffmpeg."""
+    try:
+        # Create a temporary directory for intermediate files
+        temp_dir = tempfile.mkdtemp()
+        
+        # Paths for intermediate files
+        blurred_bg = os.path.join(temp_dir, "blurred_bg.mp4")
+        resized_center = os.path.join(temp_dir, "resized_center.mp4")
+        audio_file = os.path.join(temp_dir, "audio.aac")
+        
+        # 1. Extract audio
+        subprocess.run([
+            "ffmpeg", "-i", input_path, "-vn", "-acodec", "copy", 
+            audio_file
+        ], check=True, capture_output=True)
+        
+        # 2. Create blurred background (scale to fill 1920x1080, then blur)
+        subprocess.run([
+            "ffmpeg", "-i", input_path, "-vf", 
+            "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,boxblur=20:5", 
+            "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "23", 
+            blurred_bg
+        ], check=True, capture_output=True)
+        
+        # 3. Create centered video (scale to height=1080, maintain aspect ratio)
+        subprocess.run([
+            "ffmpeg", "-i", input_path, "-vf", 
+            "scale=-1:1080", 
+            "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "23", 
+            resized_center
+        ], check=True, capture_output=True)
+        
+        # 4. Overlay centered video on blurred background
+        # First get dimensions of the centered video
+        probe_cmd = ["ffprobe", "-v", "error", "-select_streams", "v:0", 
+                    "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", 
+                    resized_center]
+        result = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
+        width, height = map(int, result.stdout.strip().split('x'))
+        
+        # Calculate position for centered overlay
+        x_offset = (1920 - width) // 2
+        
+        # Composite videos
+        subprocess.run([
+            "ffmpeg", "-i", blurred_bg, "-i", resized_center, "-i", audio_file,
+            "-filter_complex", f"[0:v][1:v] overlay={x_offset}:0 [outv]", 
+            "-map", "[outv]", "-map", "2:a", "-c:v", "libx264", "-c:a", "aac",
+            "-shortest", output_path
+        ], check=True, capture_output=True)
+        
+    except subprocess.CalledProcessError as e:
+        # Clean up and raise an error
+        print(f"Error: {e}")
+        print(f"STDOUT: {e.stdout.decode() if e.stdout else 'None'}")
+        print(f"STDERR: {e.stderr.decode() if e.stderr else 'None'}")
+        if Path(output_path).exists():
+            Path(output_path).unlink()
+        raise e
+    finally:
+        # Clean up temp files
+        for file in [blurred_bg, resized_center, audio_file]:
+            if Path(file).exists():
+                Path(file).unlink()
+        if Path(temp_dir).exists():
+            Path(temp_dir).rmdir()
 
 def create_landscape_video(input_path, output_path):
-    # Load the video
-    video = mp.VideoFileClip(input_path)
-    
-    # Force video to 30 FPS and calculate adjusted duration
-    video = video.set_fps(30)
-    frame_duration = 1.0/30  # Duration of one frame at 30fps
-    exact_duration = video.duration - (4 * frame_duration)  # Remove 2 frames worth of duration
-    
-    # Target dimensions
-    target_width = 1920
-    target_height = 1080
-    
-    # Calculate scaling for portrait video in center
-    scale = target_height/video.h  # Changed to always match height
-    new_size = (int(video.w * scale), int(video.h * scale))
-    
-    # Resize original video for center
-    center_video = video.resize(new_size)
-    
-    # Create blurred background - maintain aspect ratio while filling frame
-    bg_scale = max(target_width/video.w, target_height/video.h)
-    bg_size = (int(video.w * bg_scale), int(video.h * bg_scale))
-    background = video.resize(bg_size)
-    background = background.without_audio()  # This line ensures background has no audio
-    
-    # Calculate position to center the background
-    bg_x = (target_width - bg_size[0]) // 2
-    bg_y = (target_height - bg_size[1]) // 2
-    background = background.set_position((bg_x, bg_y))
-    
-    # Apply stronger blur
-    background = background.fl_image(lambda frame: np.array(
-        Image.fromarray(frame)
-        .filter(ImageFilter.GaussianBlur(radius=30))  # Increased blur radius
-        .resize((bg_size[0], bg_size[1]))
-    ))
-    
-    # Position center video
-    x_center = (target_width - new_size[0]) // 2
-    center_video = center_video.set_position((x_center, 0))
-    
-    # Composite final video
-    final = mp.CompositeVideoClip([background, center_video], size=(target_width, target_height))
-    
-    # Improved audio handling with adjusted duration
-    if center_video.audio is not None:
-        # Ensure audio duration matches adjusted video duration
-        audio = center_video.audio.subclip(0, exact_duration)
-        final = final.set_audio(audio)
-    
-    # Set the duration of the final video to match the adjusted duration
-    final = final.set_duration(exact_duration)
-    
-    # Write output with high quality settings
-    try:
-        final.write_videofile(
-            str(output_path),
-            codec='libx264',
-            audio_codec='aac',
-            temp_audiofile='temp-audio.m4a',
-            remove_temp=True,
-            fps=30,
-            bitrate='6000k',  # High bitrate for better quality
-            audio_bitrate='320k',  # High audio bitrate
-            preset='slow',  # Slower encoding for better quality
-            threads=4,  # Use multiple threads for faster processing
-            ffmpeg_params=[
-                '-profile:v', 'high',  # High profile for better quality
-                '-level', '4.1',  # Higher level for better quality
-                '-crf', '17',  # Lower CRF value for higher quality (range 0-51, lower is better)
-                '-movflags', '+faststart'  # Enable fast start for web playback
-            ]
-        )
-    except Exception as e:
-        # Clean up resources
-        video.close()
-        final.close()
-        if Path(output_path).exists():
-            Path(output_path).unlink()
-        raise e
-    finally:
-        # Clean up resources
-        video.close()
-        final.close()
+    """
+    Create a landscape video (wrapper for the direct implementation).
+    This function maintains backwards compatibility.
+    """
+    # Just call the direct implementation
+    create_landscape_video_direct(input_path, output_path)
 
 def get_video_metadata(video_path):
     """Get metadata for a video file"""
@@ -496,9 +509,8 @@ def main():
             for original_name, videos in original_files.items():
                 st.write(f"**Original file:** {original_name}")
                 
-                # Create a row for each video format
+                # Create a row for each video
                 for video in videos:
-                    # Create a column for each video with a smaller width
                     col1, col2 = st.columns([3, 1])
                     
                     with col1:
