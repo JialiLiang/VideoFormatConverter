@@ -576,7 +576,7 @@ def main():
     st.markdown("### About")
     
     # Display example image with smaller size
-    st.image("exemple.png", caption="Format examples", width=400)
+    st.image("exemple.png", caption="Format examples", width=600)
     
     st.markdown("""
     Made with ❤️ by Jiali
