@@ -575,16 +575,10 @@ def main():
     st.markdown("---")
     st.markdown("### About")
     
-    # Display example image
-    st.image("exemple.png", caption="Format examples")
+    # Display example image with smaller size
+    st.image("exemple.png", caption="Format examples", width=400)
     
     st.markdown("""
-    This app helps you convert your vertical videos to different formats suitable for various platforms:
-    
-    - 📱 **Square (1080x1080)**: Google Ads
-    - 🎨 **Square with Blur (1080x1080)**: Google Ads ( keep the original 9x16 aspect ratio and add a blur effect)
-    - 🖼️ **Landscape (1920x1080)**: YouTube ( keep the original 9x16 and add a blur effect)
-    
     Made with ❤️ by Jiali
     """)
 
