@@ -10,6 +10,18 @@ import shutil
 import time
 import subprocess
 
+# Set up ffmpeg path - try to use imageio-ffmpeg binary if system ffmpeg is not available
+try:
+    # Try running ffmpeg to see if it's available
+    subprocess.run(["ffmpeg", "-version"], check=True, capture_output=True)
+except (subprocess.SubprocessError, FileNotFoundError):
+    # If ffmpeg is not found, use imageio-ffmpeg binary
+    import imageio_ffmpeg
+    ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+    # Update subprocess env path for all calls
+    os.environ["PATH"] = os.environ.get("PATH", "") + os.pathsep + str(Path(ffmpeg_path).parent)
+    print(f"Using ffmpeg from imageio-ffmpeg: {ffmpeg_path}")
+
 # Patch moviepy's resize function to use the correct Pillow constant
 from functools import partial
 
@@ -146,6 +158,10 @@ def create_square_blur_video_direct(input_path, output_path):
     import tempfile
     from pathlib import Path
     
+    # Get ffmpeg command
+    ffmpeg_cmd = get_ffmpeg_path()
+    ffprobe_cmd = "ffprobe"  # Also handle ffprobe
+    
     try:
         # Create a temporary directory for intermediate files
         temp_dir = tempfile.mkdtemp()
@@ -157,12 +173,12 @@ def create_square_blur_video_direct(input_path, output_path):
         
         # 1. Extract audio
         subprocess.run([
-            "ffmpeg", "-i", input_path, "-vn", "-acodec", "copy", 
+            ffmpeg_cmd, "-i", input_path, "-vn", "-acodec", "copy", 
             audio_file
         ], check=True, capture_output=True)
         
         # 2. Get video dimensions
-        probe_cmd = ["ffprobe", "-v", "error", "-select_streams", "v:0", 
+        probe_cmd = [ffprobe_cmd, "-v", "error", "-select_streams", "v:0", 
                    "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", 
                    input_path]
         result = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
@@ -193,7 +209,7 @@ def create_square_blur_video_direct(input_path, output_path):
         # 3. Create blurred background (scale to fill 1080x1080, then blur)
         # Scale to fill while maintaining aspect ratio, then crop to square
         subprocess.run([
-            "ffmpeg", "-i", input_path, "-vf", 
+            ffmpeg_cmd, "-i", input_path, "-vf", 
             "scale=1080:1080:force_original_aspect_ratio=increase,crop=1080:1080,boxblur=30:5", 
             "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "23", 
             blurred_bg
@@ -202,7 +218,7 @@ def create_square_blur_video_direct(input_path, output_path):
         # 4. Create centered video using a safer filter approach
         # Use the scale filter with -2 to ensure divisible by 2 (required for h264)
         subprocess.run([
-            "ffmpeg", "-i", input_path, "-vf", 
+            ffmpeg_cmd, "-i", input_path, "-vf", 
             f"scale={visible_width}:-2", 
             "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "23", 
             resized_center
@@ -210,7 +226,7 @@ def create_square_blur_video_direct(input_path, output_path):
         
         # 5. Overlay centered video on blurred background
         subprocess.run([
-            "ffmpeg", "-i", blurred_bg, "-i", resized_center, "-i", audio_file,
+            ffmpeg_cmd, "-i", blurred_bg, "-i", resized_center, "-i", audio_file,
             "-filter_complex", f"[0:v][1:v] overlay={x_offset}:{y_offset} [outv]", 
             "-map", "[outv]", "-map", "2:a", "-c:v", "libx264", "-c:a", "aac",
             "-shortest", output_path
@@ -242,6 +258,10 @@ def create_square_blur_video(input_path, output_path):
 
 def create_landscape_video_direct(input_path, output_path):
     """Create a landscape video by directly calling ffmpeg."""
+    # Get ffmpeg command
+    ffmpeg_cmd = get_ffmpeg_path()
+    ffprobe_cmd = "ffprobe"  # Also handle ffprobe
+    
     try:
         # Create a temporary directory for intermediate files
         temp_dir = tempfile.mkdtemp()
@@ -253,13 +273,13 @@ def create_landscape_video_direct(input_path, output_path):
         
         # 1. Extract audio
         subprocess.run([
-            "ffmpeg", "-i", input_path, "-vn", "-acodec", "copy", 
+            ffmpeg_cmd, "-i", input_path, "-vn", "-acodec", "copy", 
             audio_file
         ], check=True, capture_output=True)
         
         # 2. Create blurred background (scale to fill 1920x1080, then blur)
         subprocess.run([
-            "ffmpeg", "-i", input_path, "-vf", 
+            ffmpeg_cmd, "-i", input_path, "-vf", 
             "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,boxblur=20:5", 
             "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "23", 
             blurred_bg
@@ -267,7 +287,7 @@ def create_landscape_video_direct(input_path, output_path):
         
         # 3. Create centered video (scale to height=1080, maintain aspect ratio)
         subprocess.run([
-            "ffmpeg", "-i", input_path, "-vf", 
+            ffmpeg_cmd, "-i", input_path, "-vf", 
             "scale=-1:1080", 
             "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "23", 
             resized_center
@@ -275,7 +295,7 @@ def create_landscape_video_direct(input_path, output_path):
         
         # 4. Overlay centered video on blurred background
         # First get dimensions of the centered video
-        probe_cmd = ["ffprobe", "-v", "error", "-select_streams", "v:0", 
+        probe_cmd = [ffprobe_cmd, "-v", "error", "-select_streams", "v:0", 
                     "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", 
                     resized_center]
         result = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
@@ -286,7 +306,7 @@ def create_landscape_video_direct(input_path, output_path):
         
         # Composite videos
         subprocess.run([
-            "ffmpeg", "-i", blurred_bg, "-i", resized_center, "-i", audio_file,
+            ffmpeg_cmd, "-i", blurred_bg, "-i", resized_center, "-i", audio_file,
             "-filter_complex", f"[0:v][1:v] overlay={x_offset}:0 [outv]", 
             "-map", "[outv]", "-map", "2:a", "-c:v", "libx264", "-c:a", "aac",
             "-shortest", output_path
@@ -332,6 +352,16 @@ def get_video_metadata(video_path):
             "duration": "Unknown",
             "size": "Unknown"
         }
+
+# Define a helper function to get the ffmpeg binary path
+def get_ffmpeg_path():
+    """Get the ffmpeg binary path, either from moviepy's config or our environment variable."""
+    from moviepy.config import get_setting
+    try:
+        return get_setting("FFMPEG_BINARY")
+    except:
+        # Fallback to direct command
+        return "ffmpeg"
 
 def main():
     # Set page config with a nice title and icon
