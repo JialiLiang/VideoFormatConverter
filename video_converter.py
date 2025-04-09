@@ -60,7 +60,9 @@ def patched_resize(clip, newsize=None, height=None, width=None, apply_to_mask=Tr
     return newclip
 
 # Replace the original resize function with our patched version
-mp.video.fx.resize.resize = patched_resize
+# For moviepy 2.1.2, we need to patch the resize function directly
+import moviepy.video.fx.resize as resize_module
+resize_module.resize = patched_resize
 
 def create_square_video(input_path, output_path):
     # Load the video
