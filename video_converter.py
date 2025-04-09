@@ -575,15 +575,7 @@ def main():
                 
                 st.divider()
     
-    # Add a footer with additional information
-    st.markdown("---")
-    
-    # Add the "Made with love" text
-    st.markdown("""
-    Made with ❤️ by Jiali
-    """)
-    
-    st.markdown("### About")
+    st.markdown("### Format examples")
     
     # Display example image with smaller size
     st.image("exemple.png", caption="Format examples", width=600)
