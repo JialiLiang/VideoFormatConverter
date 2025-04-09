@@ -567,27 +567,35 @@ def main():
         # Add batch download option - show even with a single video
         st.info("💡 Tip: You can download individual videos or use the batch download option below.")
         
-        # Create a zip file with all videos for batch download
-        if st.button("📦 Download All Videos (ZIP)", type="primary", use_container_width=True):
-            with st.spinner("Preparing ZIP file..."):
-                # Create a temporary zip file
-                zip_path = os.path.join(tempfile.gettempdir(), "converted_videos.zip")
+        # Create a function to generate the ZIP file
+        def create_zip_file():
+            # Create a temporary zip file
+            zip_path = os.path.join(tempfile.gettempdir(), "converted_videos.zip")
+            
+            # Create a zip file with all videos
+            import zipfile
+            with zipfile.ZipFile(zip_path, 'w') as zipf:
+                for video in st.session_state.processed_videos:
+                    zipf.write(video["path"], arcname=video["name"])
+            
+            # Read the zip file
+            with open(zip_path, "rb") as f:
+                zip_data = f.read()
+            
+            # Clean up the temporary zip file
+            if Path(zip_path).exists():
+                Path(zip_path).unlink()
                 
-                # Create a zip file with all videos
-                import zipfile
-                with zipfile.ZipFile(zip_path, 'w') as zipf:
-                    for video in st.session_state.processed_videos:
-                        zipf.write(video["path"], arcname=video["name"])
-                
-                # Provide download button for the zip file
-                with open(zip_path, "rb") as f:
-                    st.download_button(
-                        label="📥 Download ZIP File",
-                        data=f,
-                        file_name="converted_videos.zip",
-                        mime="application/zip",
-                        use_container_width=True
-                    )
+            return zip_data
+        
+        # Provide a single download button that creates and downloads the ZIP
+        st.download_button(
+            label="📦 Download All Videos (ZIP)",
+            data=create_zip_file,
+            file_name="converted_videos.zip",
+            mime="application/zip",
+            use_container_width=True
+        )
         
         # Group videos by original file
         original_files = {}
