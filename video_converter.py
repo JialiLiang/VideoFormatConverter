@@ -149,18 +149,25 @@ def create_square_blur_video(input_path, output_path):
     # Target dimensions (square)
     target_size = 1080
     
-    # Calculate scaling for portrait video in center
-    scale = target_size/video.h  # Changed to always match height
+    # Calculate the scale to fit original video within the square while preserving aspect ratio
+    # We'll use the smaller of width/height scale factors to ensure video fits inside the square
+    if video.w > video.h:  # Landscape orientation
+        scale = min(target_size / video.w, target_size / video.h)
+    else:  # Portrait orientation
+        scale = min(target_size / video.w, target_size / video.h)
+    
+    # Keep original aspect ratio
     new_size = (int(video.w * scale), int(video.h * scale))
     
-    # Resize original video for center - use resize function directly
+    # Resize original video while preserving aspect ratio
     center_video = resize(video, new_size)
     
-    # Create blurred background - maintain aspect ratio while filling frame
-    bg_scale = max(target_size/video.w, target_size/video.h)
+    # Create a blurred background from the original video
+    # Scale it to be larger than the target size to fill the frame
+    bg_scale = max(target_size / video.w, target_size / video.h) * 1.1  # Scale up a bit more to ensure full coverage
     bg_size = (int(video.w * bg_scale), int(video.h * bg_scale))
     background = resize(video, bg_size)
-    background = background.without_audio()  # This line ensures background has no audio
+    background = background.without_audio()
     
     # Calculate position to center the background
     bg_x = (target_size - bg_size[0]) // 2
@@ -170,11 +177,11 @@ def create_square_blur_video(input_path, output_path):
     # Apply stronger blur
     background = background.fl_image(lambda frame: np.array(
         Image.fromarray(frame)
-        .filter(ImageFilter.GaussianBlur(radius=30))  # Increased blur radius
+        .filter(ImageFilter.GaussianBlur(radius=30))
         .resize((bg_size[0], bg_size[1]))
     ))
     
-    # Position center video
+    # Position center video in the middle of the square
     x_center = (target_size - new_size[0]) // 2
     y_center = (target_size - new_size[1]) // 2
     center_video = center_video.set_position((x_center, y_center))
