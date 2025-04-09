@@ -1,5 +1,10 @@
 import streamlit as st
-import moviepy.editor as mp
+# Import individual components from moviepy instead of using moviepy.editor
+from moviepy.video.io.VideoFileClip import VideoFileClip
+from moviepy.video.VideoClip import VideoClip, ImageClip, ColorClip
+from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
+from moviepy.video.fx.resize import resize
+from moviepy.audio.AudioClip import AudioClip
 from pathlib import Path
 import numpy as np
 from PIL import Image, ImageFilter
@@ -9,7 +14,6 @@ import shutil
 import time
 
 # Patch moviepy's resize function to use the correct Pillow constant
-from moviepy.video.fx.resize import resize
 from functools import partial
 
 # Define a patched version of the resize function
@@ -66,7 +70,7 @@ resize_module.resize = patched_resize
 
 def create_square_video(input_path, output_path):
     # Load the video
-    video = mp.VideoFileClip(input_path)
+    video = VideoFileClip(input_path)
     
     # Force video to 30 FPS and calculate adjusted duration
     video = video.set_fps(30)
@@ -134,7 +138,7 @@ def create_square_video(input_path, output_path):
 
 def create_square_blur_video(input_path, output_path):
     # Load the video
-    video = mp.VideoFileClip(input_path)
+    video = VideoFileClip(input_path)
     
     # Force video to 30 FPS and calculate adjusted duration
     video = video.set_fps(30)
@@ -175,7 +179,7 @@ def create_square_blur_video(input_path, output_path):
     center_video = center_video.set_position((x_center, y_center))
     
     # Composite final video
-    final = mp.CompositeVideoClip([background, center_video], size=(target_size, target_size))
+    final = CompositeVideoClip([background, center_video], size=(target_size, target_size))
     
     # Improved audio handling with adjusted duration
     if center_video.audio is not None:
@@ -220,7 +224,7 @@ def create_square_blur_video(input_path, output_path):
 
 def create_landscape_video(input_path, output_path):
     # Load the video
-    video = mp.VideoFileClip(input_path)
+    video = VideoFileClip(input_path)
     
     # Force video to 30 FPS and calculate adjusted duration
     video = video.set_fps(30)
@@ -261,7 +265,7 @@ def create_landscape_video(input_path, output_path):
     center_video = center_video.set_position((x_center, 0))
     
     # Composite final video
-    final = mp.CompositeVideoClip([background, center_video], size=(target_width, target_height))
+    final = CompositeVideoClip([background, center_video], size=(target_width, target_height))
     
     # Improved audio handling with adjusted duration
     if center_video.audio is not None:
@@ -307,7 +311,7 @@ def create_landscape_video(input_path, output_path):
 def get_video_metadata(video_path):
     """Get metadata for a video file"""
     try:
-        video = mp.VideoFileClip(video_path)
+        video = VideoFileClip(video_path)
         duration = video.duration
         size_mb = os.path.getsize(video_path) / (1024 * 1024)
         video.close()
