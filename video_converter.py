@@ -407,6 +407,10 @@ def main():
         # Add large convert button
         if col1.button("🚀 Convert Videos!", type="primary", use_container_width=True):
             st.session_state.stop_processing = False
+            
+            # Add loading message
+            st.info("⏳ Video conversion is in progress. This may take a few minutes depending on the video size and format. Please be patient - we're working on it!")
+            
             progress_text = st.empty()
             progress_bar = st.progress(0)
             
