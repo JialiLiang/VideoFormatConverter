@@ -1,11 +1,5 @@
 import streamlit as st
-# Import individual components from moviepy instead of using moviepy.editor
-from moviepy.video.io.VideoFileClip import VideoFileClip
-from moviepy.video.VideoClip import VideoClip, ImageClip, ColorClip
-from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
-from moviepy.video.fx.resize import resize
-from moviepy.video.fx.crop import crop
-from moviepy.audio.AudioClip import AudioClip
+import moviepy.editor as mp
 from pathlib import Path
 import numpy as np
 from PIL import Image, ImageFilter
@@ -64,14 +58,13 @@ def patched_resize(clip, newsize=None, height=None, width=None, apply_to_mask=Tr
     
     return newclip
 
-# Replace the original resize function with our patched version
-# For moviepy 2.1.2, we need to patch the resize function directly
-import moviepy.video.fx.resize as resize_module
-resize_module.resize = patched_resize
+# Apply the patched resize function to moviepy if needed
+# This is a fallback in case the direct resize method has issues
+mp.video.fx.resize.resize = patched_resize
 
 def create_square_video(input_path, output_path):
     # Load the video
-    video = VideoFileClip(input_path)
+    video = mp.VideoFileClip(input_path)
     
     # Force video to 30 FPS and calculate adjusted duration
     video = video.set_fps(30)
@@ -94,13 +87,13 @@ def create_square_video(input_path, output_path):
         x_center = 0
         y_center = (video.h - crop_height) // 2
     
-    # Crop the video to square format - use crop function directly
-    cropped_video = crop(video, x1=x_center, y1=y_center, 
-                         x2=x_center + crop_width, 
-                         y2=y_center + crop_height)
+    # Crop the video to square format
+    cropped_video = video.crop(x1=x_center, y1=y_center, 
+                             x2=x_center + crop_width, 
+                             y2=y_center + crop_height)
     
-    # Resize to exact target size - use resize function directly
-    cropped_video = resize(cropped_video, (target_size, target_size))
+    # Resize to exact target size
+    cropped_video = cropped_video.resize((target_size, target_size))
     
     # Set the duration of the final video to match the adjusted duration
     cropped_video = cropped_video.set_duration(exact_duration)
@@ -139,7 +132,7 @@ def create_square_video(input_path, output_path):
 
 def create_square_blur_video(input_path, output_path):
     # Load the video
-    video = VideoFileClip(input_path)
+    video = mp.VideoFileClip(input_path)
     
     # Force video to 30 FPS and calculate adjusted duration
     video = video.set_fps(30)
@@ -149,43 +142,38 @@ def create_square_blur_video(input_path, output_path):
     # Target dimensions (square)
     target_size = 1080
     
-    # Calculate the scale to fit original video within the square while preserving aspect ratio
-    scale = min(target_size / video.w, target_size / video.h) * 0.85  # Scale to 85% of max size to leave some margin
+    # Calculate scaling for portrait video in center
+    scale = target_size/video.h  # Changed to always match height
+    new_size = (int(video.w * scale), int(video.h * scale))
     
-    # Calculate new dimensions that preserve aspect ratio
-    new_width = int(video.w * scale)
-    new_height = int(video.h * scale)
+    # Resize original video for center
+    center_video = video.resize(new_size)
     
-    # Resize original video while preserving aspect ratio
-    center_video = resize(video, (new_width, new_height))
-    
-    # Create a blurred background from the original video
-    # Scale it to be larger than the target size to fill the frame
-    bg_scale = max(target_size / video.w, target_size / video.h) * 1.1  # Scale up by 10% to ensure no black edges
-    bg_width = int(video.w * bg_scale)
-    bg_height = int(video.h * bg_scale)
-    background = resize(video, (bg_width, bg_height))
-    background = background.without_audio()
+    # Create blurred background - maintain aspect ratio while filling frame
+    bg_scale = max(target_size/video.w, target_size/video.h)
+    bg_size = (int(video.w * bg_scale), int(video.h * bg_scale))
+    background = video.resize(bg_size)
+    background = background.without_audio()  # This line ensures background has no audio
     
     # Calculate position to center the background
-    bg_x = (target_size - bg_width) // 2
-    bg_y = (target_size - bg_height) // 2
+    bg_x = (target_size - bg_size[0]) // 2
+    bg_y = (target_size - bg_size[1]) // 2
     background = background.set_position((bg_x, bg_y))
     
     # Apply stronger blur
     background = background.fl_image(lambda frame: np.array(
         Image.fromarray(frame)
-        .filter(ImageFilter.GaussianBlur(radius=30))
-        .resize((bg_width, bg_height))
+        .filter(ImageFilter.GaussianBlur(radius=30))  # Increased blur radius
+        .resize((bg_size[0], bg_size[1]))
     ))
     
-    # Position center video in the middle of the square
-    x_center = (target_size - new_width) // 2
-    y_center = (target_size - new_height) // 2
+    # Position center video
+    x_center = (target_size - new_size[0]) // 2
+    y_center = (target_size - new_size[1]) // 2
     center_video = center_video.set_position((x_center, y_center))
     
     # Composite final video
-    final = CompositeVideoClip([background, center_video], size=(target_size, target_size))
+    final = mp.CompositeVideoClip([background, center_video], size=(target_size, target_size))
     
     # Improved audio handling with adjusted duration
     if center_video.audio is not None:
@@ -230,7 +218,7 @@ def create_square_blur_video(input_path, output_path):
 
 def create_landscape_video(input_path, output_path):
     # Load the video
-    video = VideoFileClip(input_path)
+    video = mp.VideoFileClip(input_path)
     
     # Force video to 30 FPS and calculate adjusted duration
     video = video.set_fps(30)
@@ -241,42 +229,37 @@ def create_landscape_video(input_path, output_path):
     target_width = 1920
     target_height = 1080
     
-    # Calculate dimensions for the centered video while maintaining aspect ratio
-    # For vertical videos, we'll use the height as the constraint
-    scale = min(target_height / video.h, target_width / video.w)
-    new_width = int(video.w * scale)
-    new_height = int(video.h * scale)
+    # Calculate scaling for portrait video in center
+    scale = target_height/video.h  # Changed to always match height
+    new_size = (int(video.w * scale), int(video.h * scale))
     
-    # Resize original video while maintaining aspect ratio - use resize function directly
-    center_video = resize(video, (new_width, new_height))
+    # Resize original video for center
+    center_video = video.resize(new_size)
     
-    # Create blurred background from the original video
-    # Scale it to fill the entire frame while maintaining aspect ratio
-    bg_scale = max(target_width / video.w, target_height / video.h) * 1.1  # Scale up by 10% to ensure no black edges
-    bg_width = int(video.w * bg_scale)
-    bg_height = int(video.h * bg_scale)
-    background = resize(video, (bg_width, bg_height))
-    background = background.without_audio()
+    # Create blurred background - maintain aspect ratio while filling frame
+    bg_scale = max(target_width/video.w, target_height/video.h)
+    bg_size = (int(video.w * bg_scale), int(video.h * bg_scale))
+    background = video.resize(bg_size)
+    background = background.without_audio()  # This line ensures background has no audio
     
     # Calculate position to center the background
-    bg_x = (target_width - bg_width) // 2
-    bg_y = (target_height - bg_height) // 2
+    bg_x = (target_width - bg_size[0]) // 2
+    bg_y = (target_height - bg_size[1]) // 2
     background = background.set_position((bg_x, bg_y))
     
     # Apply stronger blur
     background = background.fl_image(lambda frame: np.array(
         Image.fromarray(frame)
-        .filter(ImageFilter.GaussianBlur(radius=30))
-        .resize((bg_width, bg_height))
+        .filter(ImageFilter.GaussianBlur(radius=30))  # Increased blur radius
+        .resize((bg_size[0], bg_size[1]))
     ))
     
-    # Position center video in the middle
-    x_center = (target_width - new_width) // 2
-    y_center = (target_height - new_height) // 2
-    center_video = center_video.set_position((x_center, y_center))
+    # Position center video
+    x_center = (target_width - new_size[0]) // 2
+    center_video = center_video.set_position((x_center, 0))
     
     # Composite final video
-    final = CompositeVideoClip([background, center_video], size=(target_width, target_height))
+    final = mp.CompositeVideoClip([background, center_video], size=(target_width, target_height))
     
     # Improved audio handling with adjusted duration
     if center_video.audio is not None:
@@ -318,11 +301,11 @@ def create_landscape_video(input_path, output_path):
         # Clean up resources
         video.close()
         final.close()
-    
+
 def get_video_metadata(video_path):
     """Get metadata for a video file"""
     try:
-        video = VideoFileClip(video_path)
+        video = mp.VideoFileClip(video_path)
         duration = video.duration
         size_mb = os.path.getsize(video_path) / (1024 * 1024)
         video.close()
