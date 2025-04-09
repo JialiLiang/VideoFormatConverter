@@ -243,34 +243,39 @@ def create_landscape_video(input_path, output_path):
     target_width = 1920
     target_height = 1080
     
-    # Calculate scaling for portrait video in center
-    scale = target_height/video.h  # Changed to always match height
-    new_size = (int(video.w * scale), int(video.h * scale))
+    # Calculate dimensions for the centered video while maintaining aspect ratio
+    # For vertical videos, we'll use the height as the constraint
+    scale = min(target_height / video.h, target_width / video.w)
+    new_width = int(video.w * scale)
+    new_height = int(video.h * scale)
     
-    # Resize original video for center - use resize function directly
-    center_video = resize(video, new_size)
+    # Resize original video while maintaining aspect ratio - use resize function directly
+    center_video = resize(video, (new_width, new_height))
     
-    # Create blurred background - maintain aspect ratio while filling frame
-    bg_scale = max(target_width/video.w, target_height/video.h)
-    bg_size = (int(video.w * bg_scale), int(video.h * bg_scale))
-    background = resize(video, bg_size)
-    background = background.without_audio()  # This line ensures background has no audio
+    # Create blurred background from the original video
+    # Scale it to fill the entire frame while maintaining aspect ratio
+    bg_scale = max(target_width / video.w, target_height / video.h) * 1.1  # Scale up by 10% to ensure no black edges
+    bg_width = int(video.w * bg_scale)
+    bg_height = int(video.h * bg_scale)
+    background = resize(video, (bg_width, bg_height))
+    background = background.without_audio()
     
     # Calculate position to center the background
-    bg_x = (target_width - bg_size[0]) // 2
-    bg_y = (target_height - bg_size[1]) // 2
+    bg_x = (target_width - bg_width) // 2
+    bg_y = (target_height - bg_height) // 2
     background = background.set_position((bg_x, bg_y))
     
     # Apply stronger blur
     background = background.fl_image(lambda frame: np.array(
         Image.fromarray(frame)
-        .filter(ImageFilter.GaussianBlur(radius=30))  # Increased blur radius
-        .resize((bg_size[0], bg_size[1]))
+        .filter(ImageFilter.GaussianBlur(radius=30))
+        .resize((bg_width, bg_height))
     ))
     
-    # Position center video
-    x_center = (target_width - new_size[0]) // 2
-    center_video = center_video.set_position((x_center, 0))
+    # Position center video in the middle
+    x_center = (target_width - new_width) // 2
+    y_center = (target_height - new_height) // 2
+    center_video = center_video.set_position((x_center, y_center))
     
     # Composite final video
     final = CompositeVideoClip([background, center_video], size=(target_width, target_height))
@@ -361,7 +366,7 @@ def main():
     with col2:
         square_blur_format = st.checkbox("Square with Blur (1080x1080)", value=False)
     with col3:
-        landscape_format = st.checkbox("Landscape (1920x1080)", value=True)
+        landscape_format = st.checkbox("Landscape (1920x1080)", value=False)
     
     # File uploader for multiple videos
     uploaded_files = st.file_uploader("Upload videos", type=['mp4', 'mov'], accept_multiple_files=True)
