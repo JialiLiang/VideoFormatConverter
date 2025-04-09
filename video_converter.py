@@ -150,40 +150,38 @@ def create_square_blur_video(input_path, output_path):
     target_size = 1080
     
     # Calculate the scale to fit original video within the square while preserving aspect ratio
-    # We'll use the smaller of width/height scale factors to ensure video fits inside the square
-    if video.w > video.h:  # Landscape orientation
-        scale = min(target_size / video.w, target_size / video.h)
-    else:  # Portrait orientation
-        scale = min(target_size / video.w, target_size / video.h)
+    scale = min(target_size / video.w, target_size / video.h) * 0.85  # Scale to 85% of max size to leave some margin
     
-    # Keep original aspect ratio
-    new_size = (int(video.w * scale), int(video.h * scale))
+    # Calculate new dimensions that preserve aspect ratio
+    new_width = int(video.w * scale)
+    new_height = int(video.h * scale)
     
     # Resize original video while preserving aspect ratio
-    center_video = resize(video, new_size)
+    center_video = resize(video, (new_width, new_height))
     
     # Create a blurred background from the original video
     # Scale it to be larger than the target size to fill the frame
-    bg_scale = max(target_size / video.w, target_size / video.h) * 1.1  # Scale up a bit more to ensure full coverage
-    bg_size = (int(video.w * bg_scale), int(video.h * bg_scale))
-    background = resize(video, bg_size)
+    bg_scale = max(target_size / video.w, target_size / video.h) * 1.1  # Scale up by 10% to ensure no black edges
+    bg_width = int(video.w * bg_scale)
+    bg_height = int(video.h * bg_scale)
+    background = resize(video, (bg_width, bg_height))
     background = background.without_audio()
     
     # Calculate position to center the background
-    bg_x = (target_size - bg_size[0]) // 2
-    bg_y = (target_size - bg_size[1]) // 2
+    bg_x = (target_size - bg_width) // 2
+    bg_y = (target_size - bg_height) // 2
     background = background.set_position((bg_x, bg_y))
     
     # Apply stronger blur
     background = background.fl_image(lambda frame: np.array(
         Image.fromarray(frame)
         .filter(ImageFilter.GaussianBlur(radius=30))
-        .resize((bg_size[0], bg_size[1]))
+        .resize((bg_width, bg_height))
     ))
     
     # Position center video in the middle of the square
-    x_center = (target_size - new_size[0]) // 2
-    y_center = (target_size - new_size[1]) // 2
+    x_center = (target_size - new_width) // 2
+    y_center = (target_size - new_height) // 2
     center_video = center_video.set_position((x_center, y_center))
     
     # Composite final video
