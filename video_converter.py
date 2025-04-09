@@ -544,39 +544,40 @@ def main():
         
         # Create a container with a smaller width for the video display
         with st.container():
-            # Use columns to create a more compact layout
+            # Display each original file's videos in a separate section
             for original_name, videos in original_files.items():
-                st.write(f"**Original file:** {original_name}")
-                
-                # Create a row for each video
-                for video in videos:
-                    col1, col2 = st.columns([3, 1])
+                # Create a card-like container for each original file
+                with st.expander(f"📹 Original: {original_name}", expanded=True):
+                    # Create columns for the videos
+                    cols = st.columns(min(len(videos), 3))
                     
-                    with col1:
-                        st.write(f"**{video['format']}**")
-                        
-                        # Get video metadata
-                        metadata = get_video_metadata(video["path"])
-                        
-                        # Display video preview with a smaller size
-                        st.video(video["path"], start_time=0)
-                        
-                        # Display metadata
-                        st.caption(f"⏱️ Duration: {metadata['duration']}")
-                        st.caption(f"📊 Size: {metadata['size']}")
-                    
-                    with col2:
-                        # Add download button in the second column
-                        with open(video["path"], "rb") as file:
-                            st.download_button(
-                                label=f"📥 Download",
-                                data=file,
-                                file_name=video["name"],
-                                mime="video/mp4",
-                                key=f"download_{video['name']}",
-                                use_container_width=True
-                            )
+                    # Display each video in a column
+                    for i, video in enumerate(videos):
+                        with cols[i % len(cols)]:
+                            st.write(f"**{video['format']}**")
+                            
+                            # Get video metadata
+                            metadata = get_video_metadata(video["path"])
+                            
+                            # Display video preview with a smaller size
+                            st.video(video["path"], start_time=0)
+                            
+                            # Display metadata
+                            st.caption(f"⏱️ Duration: {metadata['duration']}")
+                            st.caption(f"📊 Size: {metadata['size']}")
+                            
+                            # Add download button
+                            with open(video["path"], "rb") as file:
+                                st.download_button(
+                                    label=f"📥 Download",
+                                    data=file,
+                                    file_name=video["name"],
+                                    mime="video/mp4",
+                                    key=f"download_{video['name']}",
+                                    use_container_width=True
+                                )
                 
+                # Add a divider between different original files
                 st.divider()
     
     st.markdown("### Format examples")
