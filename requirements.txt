@@ -6,4 +6,5 @@ decorator==4.4.2
 imageio==2.31.1
 imageio-ffmpeg==0.4.8
 tqdm==4.66.1
-proglog==0.1.10 
+proglog==0.1.10
+setuptools>=65.5.1 
