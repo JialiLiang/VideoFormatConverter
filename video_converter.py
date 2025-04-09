@@ -370,6 +370,10 @@ def main():
         page_icon="🎥",
         layout="wide"
     )
+
+st.markdown("""
+    Made with ❤️ by Jiali
+    """)
     
     # Main title with emoji
     st.title("🎥 Photoroom Video Format Converter")
@@ -577,10 +581,6 @@ def main():
     
     # Display example image with smaller size
     st.image("exemple.png", caption="Format examples", width=600)
-    
-    st.markdown("""
-    Made with ❤️ by Jiali
-    """)
 
 if __name__ == "__main__":
     main() 
