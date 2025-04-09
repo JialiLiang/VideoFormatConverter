@@ -4,6 +4,7 @@ from moviepy.video.io.VideoFileClip import VideoFileClip
 from moviepy.video.VideoClip import VideoClip, ImageClip, ColorClip
 from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
 from moviepy.video.fx.resize import resize
+from moviepy.video.fx.crop import crop
 from moviepy.audio.AudioClip import AudioClip
 from pathlib import Path
 import numpy as np
@@ -93,13 +94,13 @@ def create_square_video(input_path, output_path):
         x_center = 0
         y_center = (video.h - crop_height) // 2
     
-    # Crop the video to square format
-    cropped_video = video.crop(x1=x_center, y1=y_center, 
-                             x2=x_center + crop_width, 
-                             y2=y_center + crop_height)
+    # Crop the video to square format - use crop function directly
+    cropped_video = crop(video, x1=x_center, y1=y_center, 
+                         x2=x_center + crop_width, 
+                         y2=y_center + crop_height)
     
-    # Resize to exact target size
-    cropped_video = cropped_video.resize((target_size, target_size))
+    # Resize to exact target size - use resize function directly
+    cropped_video = resize(cropped_video, (target_size, target_size))
     
     # Set the duration of the final video to match the adjusted duration
     cropped_video = cropped_video.set_duration(exact_duration)
@@ -152,13 +153,13 @@ def create_square_blur_video(input_path, output_path):
     scale = target_size/video.h  # Changed to always match height
     new_size = (int(video.w * scale), int(video.h * scale))
     
-    # Resize original video for center
-    center_video = video.resize(new_size)
+    # Resize original video for center - use resize function directly
+    center_video = resize(video, new_size)
     
     # Create blurred background - maintain aspect ratio while filling frame
     bg_scale = max(target_size/video.w, target_size/video.h)
     bg_size = (int(video.w * bg_scale), int(video.h * bg_scale))
-    background = video.resize(bg_size)
+    background = resize(video, bg_size)
     background = background.without_audio()  # This line ensures background has no audio
     
     # Calculate position to center the background
@@ -239,13 +240,13 @@ def create_landscape_video(input_path, output_path):
     scale = target_height/video.h  # Changed to always match height
     new_size = (int(video.w * scale), int(video.h * scale))
     
-    # Resize original video for center
-    center_video = video.resize(new_size)
+    # Resize original video for center - use resize function directly
+    center_video = resize(video, new_size)
     
     # Create blurred background - maintain aspect ratio while filling frame
     bg_scale = max(target_width/video.w, target_height/video.h)
     bg_size = (int(video.w * bg_scale), int(video.h * bg_scale))
-    background = video.resize(bg_size)
+    background = resize(video, bg_size)
     background = background.without_audio()  # This line ensures background has no audio
     
     # Calculate position to center the background
