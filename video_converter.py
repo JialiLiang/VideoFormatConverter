@@ -1,5 +1,6 @@
 import streamlit as st
 import moviepy.editor as mp
+from moviepy.editor import VideoClip, VideoFileClip
 from pathlib import Path
 import numpy as np
 from PIL import Image, ImageFilter
@@ -64,14 +65,14 @@ def patched_resize(clip, newsize=None, height=None, width=None, apply_to_mask=Tr
 # Fix: Use the correct approach for patching moviepy's resize function
 try:
     # Try to patch the resize function directly on the VideoClip class
-    mp.VideoClip.resize = patched_resize
+    VideoClip.resize = patched_resize
 except AttributeError:
     # If that fails, we'll use the patched function directly in our code
     pass
 
 def create_square_video(input_path, output_path):
     # Load the video
-    video = mp.VideoFileClip(input_path)
+    video = VideoFileClip(input_path)
     
     # Force video to 30 FPS and calculate adjusted duration
     video = video.set_fps(30)
@@ -318,7 +319,7 @@ def create_landscape_video(input_path, output_path):
 def get_video_metadata(video_path):
     """Get metadata for a video file"""
     try:
-        video = mp.VideoFileClip(video_path)
+        video = VideoFileClip(video_path)
         duration = video.duration
         size_mb = os.path.getsize(video_path) / (1024 * 1024)
         video.close()
