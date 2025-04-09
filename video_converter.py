@@ -574,6 +574,10 @@ def main():
     # Add a footer with additional information
     st.markdown("---")
     st.markdown("### About")
+    
+    # Display example image
+    st.image("exemple.png", caption="Format examples")
+    
     st.markdown("""
     This app helps you convert your vertical videos to different formats suitable for various platforms:
     
