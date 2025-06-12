@@ -716,12 +716,124 @@ def main():
     use_custom_output = st.checkbox("Use custom output directory", value=False)
     
     if use_custom_output:
-        custom_output_dir = st.text_input("Enter custom output directory path", value=os.path.expanduser("~/Downloads"))
-        if not os.path.exists(custom_output_dir):
-            st.warning(f"Directory does not exist: {custom_output_dir}")
-            st.info("Please create the directory or choose a different path.")
-            return
-        output_dir = custom_output_dir
+        st.info("💡 Click the button below to select where to save your converted videos:")
+        
+        # Initialize session state for selected directory
+        if 'selected_output_dir' not in st.session_state:
+            st.session_state.selected_output_dir = os.path.expanduser("~/Downloads")
+        
+        # Create folder picker using HTML5 and JavaScript
+        import streamlit.components.v1 as components
+        
+        folder_picker_html = """
+        <div style="margin: 10px 0;">
+            <button id="folderPicker" style="
+                background: linear-gradient(90deg, #ff6b6b, #ee5a24);
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 8px;
+                cursor: pointer;
+                font-size: 16px;
+                font-weight: bold;
+                transition: all 0.3s ease;
+                box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            " onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 20px rgba(0, 0, 0, 0.3)';" 
+               onmouseout="this.style.transform='translateY(0px)'; this.style.boxShadow='0 4px 15px rgba(0, 0, 0, 0.2)';">
+                📁 Select Output Folder
+            </button>
+            <input type="file" id="folderInput" webkitdirectory style="display: none;">
+            <div id="selectedPath" style="margin-top: 10px; padding: 10px; background: #f0f2f6; border-radius: 5px; display: none;">
+                <strong>Selected folder:</strong> <span id="pathText"></span>
+            </div>
+        </div>
+        
+        <script>
+        document.getElementById('folderPicker').onclick = function() {
+            document.getElementById('folderInput').click();
+        };
+        
+        document.getElementById('folderInput').onchange = function(e) {
+            if (e.target.files.length > 0) {
+                var path = e.target.files[0].webkitRelativePath;
+                var folderPath = path.substring(0, path.lastIndexOf('/'));
+                
+                document.getElementById('pathText').textContent = folderPath || 'Root folder selected';
+                document.getElementById('selectedPath').style.display = 'block';
+                
+                // Send the folder path to Streamlit
+                var event = new CustomEvent('folderSelected', {
+                    detail: { folderPath: folderPath }
+                });
+                window.parent.document.dispatchEvent(event);
+            }
+        };
+        </script>
+        """
+        
+        # Show the folder picker
+        components.html(folder_picker_html, height=120)
+        
+        # Alternative: Simple text input with common suggestions
+        st.markdown("**Or enter the path manually:**")
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            custom_path = st.text_input(
+                "Output directory path:",
+                value=st.session_state.selected_output_dir,
+                placeholder="e.g., /Users/yourname/Downloads/MyVideos"
+            )
+        
+        with col2:
+            if st.button("📂 Use Common Folders"):
+                # Show quick options
+                st.session_state.show_quick_options = True
+        
+        # Quick folder options
+        if hasattr(st.session_state, 'show_quick_options') and st.session_state.show_quick_options:
+            st.markdown("**Quick options:**")
+            quick_cols = st.columns(4)
+            
+            common_dirs = [
+                ("Downloads", os.path.expanduser("~/Downloads")),
+                ("Desktop", os.path.expanduser("~/Desktop")),
+                ("Documents", os.path.expanduser("~/Documents")),
+                ("Current Dir", os.getcwd())
+            ]
+            
+            for i, (name, path) in enumerate(common_dirs):
+                with quick_cols[i % 4]:
+                    if st.button(f"📁 {name}", key=f"quick_{i}"):
+                        if os.path.exists(path):
+                            st.session_state.selected_output_dir = path
+                            custom_path = path
+                            st.session_state.show_quick_options = False
+                            st.rerun()
+                        else:
+                            st.error(f"{name} folder not found!")
+        
+        # Update the selected directory
+        if custom_path:
+            st.session_state.selected_output_dir = custom_path
+            output_dir = custom_path
+            
+            # Validate directory
+            if not os.path.exists(output_dir):
+                st.warning(f"⚠️ Directory does not exist: `{output_dir}`")
+                if st.button("📁 Create Directory", type="primary"):
+                    try:
+                        os.makedirs(output_dir, exist_ok=True)
+                        st.success(f"✅ Created directory: `{output_dir}`")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Failed to create directory: {str(e)}")
+                return
+            else:
+                st.success(f"✅ Videos will be saved to: `{output_dir}`")
+        else:
+            output_dir = st.session_state.selected_output_dir
+            
     else:
         # Create output directory in the current working directory
         output_dir = os.path.join(os.getcwd(), "converted_videos")
