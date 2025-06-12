@@ -774,65 +774,24 @@ def main():
         # Show the folder picker
         components.html(folder_picker_html, height=120)
         
-        # Alternative: Simple text input with common suggestions
-        st.markdown("**Or enter the path manually:**")
-        col1, col2 = st.columns([3, 1])
+        # Use the selected directory
+        output_dir = st.session_state.selected_output_dir
         
-        with col1:
-            custom_path = st.text_input(
-                "Output directory path:",
-                value=st.session_state.selected_output_dir,
-                placeholder="e.g., /Users/yourname/Downloads/MyVideos"
-            )
-        
-        with col2:
-            if st.button("📂 Use Common Folders"):
-                # Show quick options
-                st.session_state.show_quick_options = True
-        
-        # Quick folder options
-        if hasattr(st.session_state, 'show_quick_options') and st.session_state.show_quick_options:
-            st.markdown("**Quick options:**")
-            quick_cols = st.columns(4)
-            
-            common_dirs = [
-                ("Downloads", os.path.expanduser("~/Downloads")),
-                ("Desktop", os.path.expanduser("~/Desktop")),
-                ("Documents", os.path.expanduser("~/Documents")),
-                ("Current Dir", os.getcwd())
-            ]
-            
-            for i, (name, path) in enumerate(common_dirs):
-                with quick_cols[i % 4]:
-                    if st.button(f"📁 {name}", key=f"quick_{i}"):
-                        if os.path.exists(path):
-                            st.session_state.selected_output_dir = path
-                            custom_path = path
-                            st.session_state.show_quick_options = False
-                            st.rerun()
-                        else:
-                            st.error(f"{name} folder not found!")
-        
-        # Update the selected directory
-        if custom_path:
-            st.session_state.selected_output_dir = custom_path
-            output_dir = custom_path
-            
-            # Validate directory
-            if not os.path.exists(output_dir):
-                st.warning(f"⚠️ Directory does not exist: `{output_dir}`")
-                if st.button("📁 Create Directory", type="primary"):
-                    try:
-                        os.makedirs(output_dir, exist_ok=True)
-                        st.success(f"✅ Created directory: `{output_dir}`")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Failed to create directory: {str(e)}")
-                return
-            else:
-                st.success(f"✅ Videos will be saved to: `{output_dir}`")
+        # Validate directory and show status
+        if os.path.exists(output_dir):
+            st.success(f"✅ Videos will be saved to: `{output_dir}`")
         else:
-            output_dir = st.session_state.selected_output_dir
+            st.warning(f"⚠️ Default directory will be used: `{output_dir}`")
+            # Create the directory if it doesn't exist
+            try:
+                os.makedirs(output_dir, exist_ok=True)
+                st.success(f"✅ Created directory: `{output_dir}`")
+            except Exception as e:
+                st.error(f"❌ Failed to create directory: {str(e)}")
+                # Fallback to current directory
+                output_dir = os.path.join(os.getcwd(), "converted_videos")
+                os.makedirs(output_dir, exist_ok=True)
+                st.info(f"📁 Using fallback directory: `{output_dir}`")
             
     else:
         # Create output directory in the current working directory
