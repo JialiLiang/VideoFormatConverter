@@ -9,6 +9,16 @@ import tempfile
 import shutil
 import time
 import subprocess
+import concurrent.futures
+from functools import partial
+import logging
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
 # Set up ffmpeg path - try to use imageio-ffmpeg binary if system ffmpeg is not available
 try:
@@ -22,10 +32,80 @@ except (subprocess.SubprocessError, FileNotFoundError):
     os.environ["PATH"] = os.environ.get("PATH", "") + os.pathsep + str(Path(ffmpeg_path).parent)
     print(f"Using ffmpeg from imageio-ffmpeg: {ffmpeg_path}")
 
-# Patch moviepy's resize function to use the correct Pillow constant
-from functools import partial
+# Check for hardware acceleration support
+def check_hw_accel():
+    """Check if hardware acceleration is available"""
+    try:
+        # Check for NVIDIA GPU
+        nvidia_result = subprocess.run(["nvidia-smi"], capture_output=True, text=True)
+        if nvidia_result.returncode == 0:
+            return "h264_nvenc"  # NVIDIA GPU available
+    except:
+        pass
+    
+    try:
+        # Check for Intel Quick Sync
+        intel_result = subprocess.run(["vainfo"], capture_output=True, text=True)
+        if "VAEntrypointEncSlice" in intel_result.stdout:
+            return "h264_qsv"  # Intel Quick Sync available
+    except:
+        pass
+    
+    return None  # No hardware acceleration available
 
-# Define a patched version of the resize function
+# Get optimal FFmpeg parameters based on available hardware
+def get_ffmpeg_params():
+    """Get optimized FFmpeg parameters based on available hardware"""
+    hw_accel = check_hw_accel()
+    
+    if hw_accel == "h264_nvenc":
+        return {
+            "codec": "h264_nvenc",
+            "preset": "p4",  # Faster preset for NVIDIA
+            "crf": "23",
+            "hwaccel": "cuda",
+            "hwaccel_output_format": "cuda"
+        }
+    elif hw_accel == "h264_qsv":
+        return {
+            "codec": "h264_qsv",
+            "preset": "veryfast",
+            "crf": "23",
+            "hwaccel": "qsv",
+            "hwaccel_output_format": "qsv"
+        }
+    else:
+        return {
+            "codec": "libx264",
+            "preset": "veryfast",  # Faster preset
+            "crf": "23",
+            "threads": str(os.cpu_count() or 4)  # Use all available CPU cores
+        }
+
+# Process a single video with the given format
+def process_video(input_path, output_path, format_type, progress_callback=None):
+    """Process a single video with the given format"""
+    try:
+        logging.info(f"Starting conversion to {format_type} format: {os.path.basename(input_path)}")
+        if format_type == "square":
+            create_square_video(input_path, output_path)
+        elif format_type == "square_blur":
+            create_square_blur_video(input_path, output_path)
+        elif format_type == "landscape":
+            create_landscape_video(input_path, output_path)
+        elif format_type == "vertical":
+            create_vertical_blur_video(input_path, output_path)
+        
+        if progress_callback:
+            progress_callback()
+        
+        logging.info(f"Successfully converted to {format_type}: {os.path.basename(output_path)}")
+        return True
+    except Exception as e:
+        logging.error(f"Error processing video {os.path.basename(input_path)}: {str(e)}")
+        return False
+
+# Patch moviepy's resize function to use the correct Pillow constant
 def patched_resize(clip, newsize=None, height=None, width=None, apply_to_mask=True):
     """
     Patched version of moviepy's resize function that works with newer Pillow versions.
@@ -184,7 +264,7 @@ def create_square_blur_video_direct(input_path, output_path):
                     audio_file
                 ], check=True, capture_output=True, text=True)
             except subprocess.CalledProcessError as e:
-                st.error(f"Error extracting audio: {e.stderr}")
+                logging.error(f"Error extracting audio: {e.stderr}")
                 raise
         
         # 2. Get video dimensions - with better error handling
@@ -195,10 +275,10 @@ def create_square_blur_video_direct(input_path, output_path):
             result = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
             orig_width, orig_height = map(int, result.stdout.strip().split('x'))
         except subprocess.CalledProcessError as e:
-            st.error(f"Error getting video dimensions: {e.stderr}")
+            logging.error(f"Error getting video dimensions: {e.stderr}")
             raise
         except ValueError as e:
-            st.error(f"Error parsing video dimensions: {result.stdout}")
+            logging.error(f"Error parsing video dimensions: {result.stdout}")
             raise
         
         # Target size is 1080x1080
@@ -232,7 +312,7 @@ def create_square_blur_video_direct(input_path, output_path):
                 blurred_bg
             ], check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
-            st.error(f"Error creating blurred background: {e.stderr}")
+            logging.error(f"Error creating blurred background: {e.stderr}")
             raise
         
         # 4. Create centered video - with better error handling
@@ -244,7 +324,7 @@ def create_square_blur_video_direct(input_path, output_path):
                 resized_center
             ], check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
-            st.error(f"Error creating centered video: {e.stderr}")
+            logging.error(f"Error creating centered video: {e.stderr}")
             raise
         
         # 5. Overlay centered video on blurred background - with better error handling
@@ -264,19 +344,19 @@ def create_square_blur_video_direct(input_path, output_path):
                     "-shortest", output_path
                 ], check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
-            st.error(f"Error overlaying videos: {e.stderr}")
+            logging.error(f"Error overlaying videos: {e.stderr}")
             raise
         
     except subprocess.CalledProcessError as e:
         # Clean up and raise an error with more details
         error_msg = f"FFmpeg error: {e.stderr if hasattr(e, 'stderr') else 'Unknown error'}"
-        st.error(error_msg)
+        logging.error(error_msg)
         if Path(output_path).exists():
             Path(output_path).unlink()
         raise Exception(error_msg)
     except Exception as e:
         # Handle other exceptions
-        st.error(f"Unexpected error: {str(e)}")
+        logging.error(f"Unexpected error: {str(e)}")
         if Path(output_path).exists():
             Path(output_path).unlink()
         raise
@@ -330,7 +410,7 @@ def create_landscape_video_direct(input_path, output_path):
                     audio_file
                 ], check=True, capture_output=True, text=True)
             except subprocess.CalledProcessError as e:
-                st.error(f"Error extracting audio: {e.stderr}")
+                logging.error(f"Error extracting audio: {e.stderr}")
                 raise
         
         # 2. Get video dimensions - with better error handling
@@ -341,10 +421,10 @@ def create_landscape_video_direct(input_path, output_path):
             result = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
             orig_width, orig_height = map(int, result.stdout.strip().split('x'))
         except subprocess.CalledProcessError as e:
-            st.error(f"Error getting video dimensions: {e.stderr}")
+            logging.error(f"Error getting video dimensions: {e.stderr}")
             raise
         except ValueError as e:
-            st.error(f"Error parsing video dimensions: {result.stdout}")
+            logging.error(f"Error parsing video dimensions: {result.stdout}")
             raise
         
         # Calculate target dimensions ensuring they're even
@@ -363,7 +443,7 @@ def create_landscape_video_direct(input_path, output_path):
                 blurred_bg
             ], check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
-            st.error(f"Error creating blurred background: {e.stderr}")
+            logging.error(f"Error creating blurred background: {e.stderr}")
             raise
         
         # 4. Create centered video - with better error handling
@@ -375,7 +455,7 @@ def create_landscape_video_direct(input_path, output_path):
                 resized_center
             ], check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
-            st.error(f"Error creating centered video: {e.stderr}")
+            logging.error(f"Error creating centered video: {e.stderr}")
             raise
         
         # 5. Overlay centered video on blurred background
@@ -399,19 +479,19 @@ def create_landscape_video_direct(input_path, output_path):
                     "-shortest", output_path
                 ], check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
-            st.error(f"Error overlaying videos: {e.stderr}")
+            logging.error(f"Error overlaying videos: {e.stderr}")
             raise
         
     except subprocess.CalledProcessError as e:
         # Clean up and raise an error with more details
         error_msg = f"FFmpeg error: {e.stderr if hasattr(e, 'stderr') else 'Unknown error'}"
-        st.error(error_msg)
+        logging.error(error_msg)
         if Path(output_path).exists():
             Path(output_path).unlink()
         raise Exception(error_msg)
     except Exception as e:
         # Handle other exceptions
-        st.error(f"Unexpected error: {str(e)}")
+        logging.error(f"Unexpected error: {str(e)}")
         if Path(output_path).exists():
             Path(output_path).unlink()
         raise
@@ -492,7 +572,7 @@ def create_vertical_blur_video_direct(input_path, output_path):
                     audio_file
                 ], check=True, capture_output=True, text=True)
             except subprocess.CalledProcessError as e:
-                st.error(f"Error extracting audio: {e.stderr}")
+                logging.error(f"Error extracting audio: {e.stderr}")
                 raise
         
         # 2. Get video dimensions - with better error handling
@@ -503,10 +583,10 @@ def create_vertical_blur_video_direct(input_path, output_path):
             result = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
             orig_width, orig_height = map(int, result.stdout.strip().split('x'))
         except subprocess.CalledProcessError as e:
-            st.error(f"Error getting video dimensions: {e.stderr}")
+            logging.error(f"Error getting video dimensions: {e.stderr}")
             raise
         except ValueError as e:
-            st.error(f"Error parsing video dimensions: {result.stdout}")
+            logging.error(f"Error parsing video dimensions: {result.stdout}")
             raise
         
         # Target dimensions
@@ -544,7 +624,7 @@ def create_vertical_blur_video_direct(input_path, output_path):
                 blurred_bg
             ], check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
-            st.error(f"Error creating blurred background: {e.stderr}")
+            logging.error(f"Error creating blurred background: {e.stderr}")
             raise
         
         # 4. Create centered video - with better error handling
@@ -556,7 +636,7 @@ def create_vertical_blur_video_direct(input_path, output_path):
                 resized_center
             ], check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
-            st.error(f"Error creating centered video: {e.stderr}")
+            logging.error(f"Error creating centered video: {e.stderr}")
             raise
         
         # 5. Overlay centered video on blurred background - with better error handling
@@ -576,19 +656,19 @@ def create_vertical_blur_video_direct(input_path, output_path):
                     "-shortest", output_path
                 ], check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
-            st.error(f"Error overlaying videos: {e.stderr}")
+            logging.error(f"Error overlaying videos: {e.stderr}")
             raise
         
     except subprocess.CalledProcessError as e:
         # Clean up and raise an error with more details
         error_msg = f"FFmpeg error: {e.stderr if hasattr(e, 'stderr') else 'Unknown error'}"
-        st.error(error_msg)
+        logging.error(error_msg)
         if Path(output_path).exists():
             Path(output_path).unlink()
         raise Exception(error_msg)
     except Exception as e:
         # Handle other exceptions
-        st.error(f"Unexpected error: {str(e)}")
+        logging.error(f"Unexpected error: {str(e)}")
         if Path(output_path).exists():
             Path(output_path).unlink()
         raise
@@ -631,9 +711,23 @@ def main():
     if 'processed_videos' not in st.session_state:
         st.session_state.processed_videos = []
     
-    # Create output directory in the current working directory
-    output_dir = os.path.join(os.getcwd(), "converted_videos")
-    os.makedirs(output_dir, exist_ok=True)
+    # Add custom output directory option
+    st.subheader("Output Settings")
+    use_custom_output = st.checkbox("Use custom output directory", value=False)
+    
+    if use_custom_output:
+        custom_output_dir = st.text_input("Enter custom output directory path", value=os.path.expanduser("~/Downloads"))
+        if not os.path.exists(custom_output_dir):
+            st.warning(f"Directory does not exist: {custom_output_dir}")
+            st.info("Please create the directory or choose a different path.")
+            return
+        output_dir = custom_output_dir
+    else:
+        # Create output directory in the current working directory
+        output_dir = os.path.join(os.getcwd(), "converted_videos")
+        os.makedirs(output_dir, exist_ok=True)
+    
+    logging.info(f"Output directory set to: {output_dir}")
     
     # Add format selection with checkboxes
     st.subheader("Select output formats")
@@ -644,14 +738,16 @@ def main():
     with col2:
         square_blur_format = st.checkbox("Square with Blur (1080x1080)", value=False)
     with col3:
-        landscape_format = st.checkbox("Landscape (1920x1080)", value=False)
+        landscape_format = st.checkbox("Landscape with Blur (1920x1080)", value=False)
     with col4:
-        vertical_blur_format = st.checkbox("Vertical with Blur (1080x1920)", value=False)
+        vertical_blur_format = st.checkbox("Vertical (1080x1920)", value=False)
     
     # File uploader for multiple videos
     uploaded_files = st.file_uploader("Upload videos", type=['mp4', 'mov'], accept_multiple_files=True)
     
     if uploaded_files:
+        logging.info(f"Received {len(uploaded_files)} videos for processing")
+        
         # Create two columns for Convert and Stop buttons
         col1, col2 = st.columns([4, 1])
         
@@ -660,7 +756,7 @@ def main():
             st.session_state.stop_processing = False
             
             # Add loading message
-            st.info("⏳ Video conversion is in progress.Your video's loading… almost showtime! 🍿")
+            st.info("⏳ Video conversion is in progress. Your video's loading… almost showtime! 🍿")
             
             progress_text = st.empty()
             progress_bar = st.progress(0)
@@ -670,107 +766,104 @@ def main():
             
             # Create a temporary directory only for input files
             temp_dir = tempfile.mkdtemp()
+            logging.info(f"Created temporary directory: {temp_dir}")
             
-            total_conversions = len(uploaded_files) * (square_format + square_blur_format + landscape_format + vertical_blur_format)
-            current_conversion = 0
-            
+            # Prepare all conversion tasks
+            conversion_tasks = []
             for i, uploaded_file in enumerate(uploaded_files):
-                # Check if stop button was clicked
-                if st.session_state.stop_processing:
-                    progress_text.text("Processing cancelled!")
-                    st.warning("Video conversion was stopped.")
-                    break
-                
-                # Create temp input file
                 input_path = os.path.join(temp_dir, f"temp_input_{i}.mp4")
                 with open(input_path, "wb") as f:
                     f.write(uploaded_file.getvalue())
                 
-                # Process square format if selected
                 if square_format:
-                    output_filename = f"{uploaded_file.name.split('.')[0]}_square.mp4"
+                    output_filename = f"{os.path.splitext(uploaded_file.name)[0]}_square.mp4"
                     output_path = os.path.join(output_dir, output_filename)
-                    progress_text.text(f"Processing {uploaded_file.name} to square format...")
-                    create_square_video(input_path, output_path)
-                    current_conversion += 1
-                    progress = current_conversion / total_conversions
-                    progress_bar.progress(progress)
-                    
-                    # Add to processed videos list
-                    st.session_state.processed_videos.append({
-                        "name": output_filename,
-                        "path": output_path,
-                        "original_name": uploaded_file.name,
-                        "format": "Square (1080x1080)"
-                    })
+                    conversion_tasks.append((input_path, output_path, "square", output_filename, uploaded_file.name, "Square (1080x1080)"))
                 
-                # Process square with blur format if selected
                 if square_blur_format:
-                    output_filename = f"{uploaded_file.name.split('.')[0]}_square_blur.mp4"
+                    output_filename = f"{os.path.splitext(uploaded_file.name)[0]}_square_blur.mp4"
                     output_path = os.path.join(output_dir, output_filename)
-                    progress_text.text(f"Processing {uploaded_file.name} to square format with blur...")
-                    create_square_blur_video(input_path, output_path)
-                    current_conversion += 1
-                    progress = current_conversion / total_conversions
-                    progress_bar.progress(progress)
-                    
-                    # Add to processed videos list
-                    st.session_state.processed_videos.append({
-                        "name": output_filename,
-                        "path": output_path,
-                        "original_name": uploaded_file.name,
-                        "format": "Square with Blur (1080x1080)"
-                    })
+                    conversion_tasks.append((input_path, output_path, "square_blur", output_filename, uploaded_file.name, "Square with Blur (1080x1080)"))
                 
-                # Process landscape format if selected
                 if landscape_format:
-                    output_filename = f"{uploaded_file.name.split('.')[0]}_landscape.mp4"
+                    output_filename = f"{os.path.splitext(uploaded_file.name)[0]}_landscape.mp4"
                     output_path = os.path.join(output_dir, output_filename)
-                    progress_text.text(f"Processing {uploaded_file.name} to landscape format...")
-                    create_landscape_video(input_path, output_path)
-                    current_conversion += 1
-                    progress = current_conversion / total_conversions
-                    progress_bar.progress(progress)
-                    
-                    # Add to processed videos list
-                    st.session_state.processed_videos.append({
-                        "name": output_filename,
-                        "path": output_path,
-                        "original_name": uploaded_file.name,
-                        "format": "Landscape (1920x1080)"
-                    })
+                    conversion_tasks.append((input_path, output_path, "landscape", output_filename, uploaded_file.name, "Landscape (1920x1080)"))
                 
-                # Process vertical blur format if selected
                 if vertical_blur_format:
-                    output_filename = f"{uploaded_file.name.split('.')[0]}_vertical_blur.mp4"
+                    output_filename = f"{os.path.splitext(uploaded_file.name)[0]}_vertical.mp4"
                     output_path = os.path.join(output_dir, output_filename)
-                    progress_text.text(f"Processing {uploaded_file.name} to vertical format with blur...")
-                    create_vertical_blur_video(input_path, output_path)
-                    current_conversion += 1
+                    conversion_tasks.append((input_path, output_path, "vertical", output_filename, uploaded_file.name, "Vertical (1080x1920)"))
+            
+            total_conversions = len(conversion_tasks)
+            
+            logging.info(f"Starting conversion of {total_conversions} videos")
+            
+            # Process videos in parallel using ThreadPoolExecutor
+            failed_conversions = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(os.cpu_count() or 4, total_conversions)) as executor:
+                futures = []
+                for input_path, output_path, format_type, output_filename, original_name, format_name in conversion_tasks:
+                    if st.session_state.stop_processing:
+                        logging.warning("Processing stopped by user")
+                        break
+                    
+                    progress_text.text(f"Processing {original_name} to {format_name}...")
+                    future = executor.submit(
+                        process_video,
+                        input_path,
+                        output_path,
+                        format_type,
+                        None  # Remove progress callback to avoid threading issues
+                    )
+                    futures.append((future, output_filename, output_path, original_name, format_name))
+                
+                # Wait for all tasks to complete and update progress in main thread
+                for i, (future, output_filename, output_path, original_name, format_name) in enumerate(futures):
+                    try:
+                        if future.result():
+                            st.session_state.processed_videos.append({
+                                "name": output_filename,
+                                "path": output_path,
+                                "original_name": original_name,
+                                "format": format_name
+                            })
+                        else:
+                            failed_conversions.append(f"{original_name} to {format_name}")
+                    except Exception as e:
+                        failed_conversions.append(f"{original_name} to {format_name}: {str(e)}")
+                        logging.error(f"Exception in future result: {str(e)}")
+                    
+                    # Update progress in main thread
+                    current_conversion = i + 1
                     progress = current_conversion / total_conversions
                     progress_bar.progress(progress)
-                    
-                    # Add to processed videos list
-                    st.session_state.processed_videos.append({
-                        "name": output_filename,
-                        "path": output_path,
-                        "original_name": uploaded_file.name,
-                        "format": "Vertical with Blur (1080x1920)"
-                    })
-                
-                # Clean up temp input file
-                os.remove(input_path)
+                    remaining = total_conversions - current_conversion
+                    logging.info(f"Progress: {current_conversion}/{total_conversions} videos processed. {remaining} videos remaining.")
             
             # Clean up temp directory
             shutil.rmtree(temp_dir)
+            logging.info("Cleaned up temporary directory")
             
             if not st.session_state.stop_processing:
                 progress_text.text("All videos processed!")
-                st.success(f"✨ Videos have been converted successfully! Saved in: {output_dir}")
+                logging.info("All videos processed successfully")
+                
+                # Display success message and any failures
+                if failed_conversions:
+                    st.warning(f"⚠️ Some conversions failed. Check the logs for details.")
+                    with st.expander("Failed conversions"):
+                        for failure in failed_conversions:
+                            st.text(f"❌ {failure}")
+                    if st.session_state.processed_videos:
+                        st.success(f"✨ Some videos have been converted successfully! Saved in: {output_dir}")
+                else:
+                    st.success(f"✨ All videos have been converted successfully! Saved in: {output_dir}")
         
         # Add stop button
         if col2.button("⏹️ Stop", type="secondary", use_container_width=True):
             st.session_state.stop_processing = True
+            logging.warning("Stop button pressed - stopping processing")
     
     # Display preview and download section if there are processed videos
     if st.session_state.processed_videos:
@@ -780,7 +873,7 @@ def main():
         # Add a clear button to reset the processed videos
         if st.button("🗑️ Clear All Videos", type="secondary"):
             st.session_state.processed_videos = []
-            st.experimental_rerun()
+            st.rerun()
         
         # Add batch download option - show even with a single video
         st.info("💡 Tip: You can download individual videos or use the batch download option below.")
@@ -831,8 +924,10 @@ def main():
                             # Get video metadata
                             metadata = get_video_metadata(video["path"])
                             
-                            # Display video preview with a smaller size
-                            st.video(video["path"], start_time=0)
+                            # Only show video preview if total number of files is 10 or less
+                            if len(st.session_state.processed_videos) <= 10:
+                                # Display video preview with a smaller size
+                                st.video(video["path"], start_time=0)
                             
                             # Display metadata
                             st.caption(f"⏱️ Duration: {metadata['duration']}")
