@@ -716,83 +716,26 @@ def main():
     use_custom_output = st.checkbox("Use custom output directory", value=False)
     
     if use_custom_output:
-        st.info("💡 Click the button below to select where to save your converted videos:")
+        # Simple text input for custom directory
+        custom_output_dir = st.text_input(
+            "Enter output directory path:", 
+            value=os.path.expanduser("~/Downloads"),
+            placeholder="e.g., /Users/yourname/Downloads/MyVideos"
+        )
         
-        # Initialize session state for selected directory
-        if 'selected_output_dir' not in st.session_state:
-            st.session_state.selected_output_dir = os.path.expanduser("~/Downloads")
+        if not os.path.exists(custom_output_dir):
+            st.warning(f"Directory does not exist: {custom_output_dir}")
+            if st.button("📁 Create Directory"):
+                try:
+                    os.makedirs(custom_output_dir, exist_ok=True)
+                    st.success(f"✅ Created directory: {custom_output_dir}")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Could not create directory: {str(e)}")
+            return
         
-        # Create folder picker using HTML5 and JavaScript
-        import streamlit.components.v1 as components
-        
-        folder_picker_html = """
-        <div style="margin: 10px 0;">
-            <button id="folderPicker" style="
-                background: linear-gradient(90deg, #ff6b6b, #ee5a24);
-                color: white;
-                border: none;
-                padding: 12px 24px;
-                border-radius: 8px;
-                cursor: pointer;
-                font-size: 16px;
-                font-weight: bold;
-                transition: all 0.3s ease;
-                box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-            " onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 20px rgba(0, 0, 0, 0.3)';" 
-               onmouseout="this.style.transform='translateY(0px)'; this.style.boxShadow='0 4px 15px rgba(0, 0, 0, 0.2)';">
-                📁 Select Output Folder
-            </button>
-            <input type="file" id="folderInput" webkitdirectory style="display: none;">
-            <div id="selectedPath" style="margin-top: 10px; padding: 10px; background: #f0f2f6; border-radius: 5px; display: none;">
-                <strong>Selected folder:</strong> <span id="pathText"></span>
-            </div>
-        </div>
-        
-        <script>
-        document.getElementById('folderPicker').onclick = function() {
-            document.getElementById('folderInput').click();
-        };
-        
-        document.getElementById('folderInput').onchange = function(e) {
-            if (e.target.files.length > 0) {
-                var path = e.target.files[0].webkitRelativePath;
-                var folderPath = path.substring(0, path.lastIndexOf('/'));
-                
-                document.getElementById('pathText').textContent = folderPath || 'Root folder selected';
-                document.getElementById('selectedPath').style.display = 'block';
-                
-                // Send the folder path to Streamlit
-                var event = new CustomEvent('folderSelected', {
-                    detail: { folderPath: folderPath }
-                });
-                window.parent.document.dispatchEvent(event);
-            }
-        };
-        </script>
-        """
-        
-        # Show the folder picker
-        components.html(folder_picker_html, height=120)
-        
-        # Use the selected directory
-        output_dir = st.session_state.selected_output_dir
-        
-        # Validate directory and show status
-        if os.path.exists(output_dir):
-            st.success(f"✅ Videos will be saved to: `{output_dir}`")
-        else:
-            st.warning(f"⚠️ Default directory will be used: `{output_dir}`")
-            # Create the directory if it doesn't exist
-            try:
-                os.makedirs(output_dir, exist_ok=True)
-                st.success(f"✅ Created directory: `{output_dir}`")
-            except Exception as e:
-                st.error(f"❌ Failed to create directory: {str(e)}")
-                # Fallback to current directory
-                output_dir = os.path.join(os.getcwd(), "converted_videos")
-                os.makedirs(output_dir, exist_ok=True)
-                st.info(f"📁 Using fallback directory: `{output_dir}`")
-            
+        output_dir = custom_output_dir
+        st.success(f"✅ Videos will be saved to: `{output_dir}`")
     else:
         # Create output directory in the current working directory
         output_dir = os.path.join(os.getcwd(), "converted_videos")
